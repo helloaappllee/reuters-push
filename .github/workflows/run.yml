@@ -1,0 +1,32 @@
+name: 路透社实时推送
+on:
+  schedule:
+    - cron: '*/6 * * * *'  # 每6分钟检测1次
+  workflow_dispatch:  # 支持手动触发测试
+
+jobs:
+  push-news:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
+
+      - name: 安装Python环境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: 安装依赖包
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 检测并推送资讯
+        run: python fast_rss.py
+
+      - name: 保存链接文件到仓库（关键！持久化对比）
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "更新最新资讯链接"
+          file_pattern: "last_link.txt"
