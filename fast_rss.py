@@ -80,22 +80,38 @@ def check_push():
         print("ℹ️  暂无新资讯，本次不推送")
         return False, None
 
-# 生成邮件内容（核心修改：时间改为黄色，其他排版不变）
+# 生成邮件内容（核心修复：提升时间样式优先级，确保黄色生效）
 def make_content(all_news):
     if not all_news:
         return "暂无可用的路透资讯"
     news_list = all_news[:10]  # 仅推10条，避免内容冗余
 
-    # 标题：仅「路透速递」，简洁醒目
-    title = f"<p><strong>「路透速递」</strong></p>"
+    # ---------------------- 颜色配置（可直接改下面的颜色代码） ----------------------
+    title_color = "#2E4057"    # 「路透速递」标题颜色（深灰蓝，醒目不刺眼）
+    time_color = "#FFD700"     # 时间颜色（亮黄色，强制生效）
+    time_bg_color = "transparent" # 时间背景色（透明，避免干扰）
+    serial_color = "#1E88E5"   # 资讯序号颜色（蓝色）
+    news_title_color = "#333333"# 资讯标题颜色（深灰色，易读）
+    link_text_color = "#4CAF50"# 「原文链接」文字颜色（绿色，区分普通文字）
+    # -----------------------------------------------------------------------------
+
+    # 标题：「路透速递」（自定义颜色+加粗，更醒目）
+    title = f"<p><strong><span style='color:{title_color};'>「路透速递」</span></strong></p>"
 
     content = []
     for i, news in enumerate(news_list, 1):
         link = news["link"]
         news_title = news["title"]
         show_t = get_show_time(news)
-        # 核心修改：给时间添加黄色样式（color:#FFD700），其他格式不变
-        content.append(f"<p>{i}. 【<span style='color:#FFD700;'>{show_t}</span>】{news_title}</p><p>👉 <a href='{link}' target='_blank'>原文链接</a></p>")
+        # 核心修复：给时间添加!important提升优先级，取消下划线、设置背景透明，避免被邮箱样式覆盖
+        content.append(f"""
+        <p style='margin: 8px 0; padding: 0;'>
+            <span style='color:{serial_color}; font-size: 16px;'>{i}</span>. 
+            【<span style='color:{time_color}!important; text-decoration: none!important; background:{time_bg_color}; font-weight: bold; font-size: 16px;'>{show_t}</span>】
+            <span style='color:{news_title_color}; font-size: 16px;'>{news_title}</span>
+        </p>
+        <p style='margin: 0 0 12px 0; padding: 0;'>👉 <a href='{link}' target='_blank' style='color:{link_text_color}; text-decoration: underline; font-size: 14px;'>原文链接</a></p>
+        """)
 
     return title + "".join(content)
 
