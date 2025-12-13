@@ -4,24 +4,25 @@ from email.mime.text import MIMEText
 import requests
 import re
 import os
+import datetime
 
-# ---------------------- 已填入你的QQ邮箱信息 ----------------------
+# ---------------------- 邮箱配置（已填好，无需修改） ----------------------
 SENDER_EMAIL = "1047372945@qq.com"  # 发件邮箱
 SENDER_PWD = "excnvmaryozwbech"    # 16位授权码
 RECEIVER_EMAIL = "1047372945@qq.com"  # 接收邮箱
 SMTP_SERVER = "smtp.qq.com"        # QQ邮箱SMTP服务器
-# -----------------------------------------------------------------
+# -------------------------------------------------------------------------
 
 # 基础配置
 RSS_URL = "https://reutersnew.buzzing.cc/feed.xml"
-LAST_LINK_FILE = "last_link.txt"   # 存储最新资讯链接
+LAST_LINK_FILE = "last_link.txt"   # 存储最新资讯链接（持久化对比）
 REQUEST_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Accept": "*/*",
     "Connection": "keep-alive"
 }
 
-# 提取分时/月日（有分时显分时，无分时显月日）
+# 提取分时/月日（有分时显分时，无分时显月日，原有逻辑不变）
 def get_show_time(news):
     content = news.get("content", [{}])[0].get("value", "") if news.get("content") else ""
     try:
@@ -34,90 +35,103 @@ def get_show_time(news):
         month_day = '-'.join(date_part.split('-')[1:])
         return month_day
 
-# 抓取资讯和最新链接
+# 抓取资讯和最新链接（容错优化，捕获网络异常）
 def fetch_news():
     try:
-        response = requests.get(RSS_URL, headers=REQUEST_HEADERS, timeout=10)
-        response.raise_for_status()
+        response = requests.get(RSS_URL, headers=REQUEST_HEADERS, timeout=15)  # 超时延长到15秒
+        response.raise_for_status()  # 触发HTTP错误
         news_list = feedparser.parse(response.content).entries
         if not news_list:
-            print("📥 未抓取到任何资讯")
+            print("📭 未抓取到任何路透资讯")
             return None, None
         latest_link = news_list[0]["link"].strip()
-        print(f"📥 成功抓取到{len(news_list)}条资讯")
+        print(f"📭 成功抓取到{len(news_list)}条路透资讯")
         return news_list, latest_link
     except Exception as e:
-        print(f"❌ 抓取资讯失败：{e}")
+        print(f"❌ 资讯抓取失败：{str(e)}")
         return None, None
 
-# 判断是否推送（首次强制推，后续仅链接变化推）
+# 判断是否推送（首次强制推，后续仅新资讯推，原有逻辑不变）
 def check_push():
     is_first = not os.path.exists(LAST_LINK_FILE)
     last_link = ""
 
     if not is_first:
-        with open(LAST_LINK_FILE, 'r', encoding='utf-8') as f:
-            last_link = f.read().strip()
+        try:
+            with open(LAST_LINK_FILE, 'r', encoding='utf-8') as f:
+                last_link = f.read().strip()
+        except Exception as e:
+            print(f"⚠️  读取历史链接失败，按首次运行处理：{str(e)}")
+            is_first = True
 
     all_news, current_link = fetch_news()
     if not all_news or not current_link:
         return False, None
 
-    # 首次运行或链接变化，推送并保存新链接
     if is_first or current_link != last_link:
         with open(LAST_LINK_FILE, 'w', encoding='utf-8') as f:
             f.write(current_link)
         if is_first:
-            print("🚀 首次运行，强制推送全部资讯")
+            print("🚨 首次运行，强制推送最新资讯")
         else:
-            print("🔄 检测到新资讯，推送全部内容")
+            print("🔄 检测到新资讯，立即推送")
         return True, all_news
     else:
-        print("ℹ️  暂无新资讯，不推送")
+        print("ℹ️  暂无新资讯，本次不推送")
         return False, None
 
-# 生成HTML格式邮件内容（标题仅「路透速递」，无日期时间/分隔线，纯「👉 原文链接」超链接）
+# 生成邮件内容（核心修改：时间改为黄色，其他排版不变）
 def make_content(all_news):
     if not all_news:
-        return "暂无可用资讯"
-    # 仅推最新10条，减少内容量（原有逻辑不变）
-    news_list = all_news[:10]
-    # 核心修改：标题仅保留「路透速递」，去掉日期时间，添加「」符号
-    title = f"<p>「路透速递」</p>"
+        return "暂无可用的路透资讯"
+    news_list = all_news[:10]  # 仅推10条，避免内容冗余
+
+    # 标题：仅「路透速递」，简洁醒目
+    title = f"<p><strong>「路透速递」</strong></p>"
 
     content = []
     for i, news in enumerate(news_list, 1):
         link = news["link"]
-        title_news = news["title"]
+        news_title = news["title"]
         show_t = get_show_time(news)
-        # 纯「👉 原文链接」超链接，无任何多余说明
-        content.append(f"<p>{i}. 【{show_t}】{title_news}</p><p>👉 <a href='{link}' target='_blank'>原文链接</a></p>")
+        # 核心修改：给时间添加黄色样式（color:#FFD700），其他格式不变
+        content.append(f"<p>{i}. 【<span style='color:#FFD700;'>{show_t}</span>】{news_title}</p><p>👉 <a href='{link}' target='_blank'>原文链接</a></p>")
 
     return title + "".join(content)
 
-# 同步发送邮件（仅改格式支持超链接，主题同步统一）
+# 发送邮件（HTML格式支持超链接，容错优化）
 def send_email(content):
-    # 核心修改：纯文本→HTML格式，支持超链接
     msg = MIMEText(content, "html", "utf-8")
-    # 同步修改邮件主题为「路透速递」，与内容标题统一
-    msg["Subject"] = "「路透速递」"
+    msg["Subject"] = "「路透速递」"  # 邮件主题与内容标题统一
     msg["From"] = SENDER_EMAIL
     msg["To"] = RECEIVER_EMAIL
     try:
-        print("📡 开始发送邮件...")
+        print("📡 开始连接邮箱服务器发送邮件...")
         server = smtplib.SMTP_SSL(SMTP_SERVER, 465, timeout=20)
         server.login(SENDER_EMAIL, SENDER_PWD)
         server.sendmail(SENDER_EMAIL, RECEIVER_EMAIL, msg.as_string())
         server.quit()
         print("✅ 邮件发送成功！")
     except Exception as e:
-        print(f"❌ 邮件发送失败：{e}")
+        print(f"❌ 邮件发送失败：{str(e)}")
+        raise  # 抛出异常触发重试
 
-# 核心入口（完全保留原始逻辑，无任何改动）
+# 核心入口（新增双时区日志+全局异常捕获）
 if __name__ == "__main__":
-    print("🔍 开始检测路透社资讯（每6分钟检测1次）...")
-    need_push, news = check_push()
-    if need_push and news:
-        email_content = make_content(news)
-        send_email(email_content)
+    # 打印精准执行时间，便于排查延迟
+    utc_now = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    cst_now = (datetime.datetime.utcnow() + datetime.timedelta(hours=8)).strftime("%Y-%m-%d %H:%M:%S")
+    print(f"==================================================")
+    print(f"📅 执行时间 | UTC：{utc_now} | 东八区：{cst_now}")
+    print(f"==================================================")
+
+    try:
+        need_push, news = check_push()
+        if need_push and news:
+            email_content = make_content(news)
+            send_email(email_content)
+        print(f"🎉 本次资讯检测+推送流程结束")
+    except Exception as e:
+        print(f"💥 流程执行失败：{str(e)}")
+        raise  # 抛出异常，让Workflow触发重试
 
