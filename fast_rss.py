@@ -76,30 +76,31 @@ def check_push():
         print("ℹ️  暂无新资讯，不推送")
         return False, None
 
-# 生成纯文本邮件内容（避免邮箱拦截）
+# 生成HTML格式邮件内容（标题仅「路透速递」，无日期时间/分隔线，纯「👉 原文链接」超链接）
 def make_content(all_news):
     if not all_news:
         return "暂无可用资讯"
-    # 仅推最新10条，减少内容量
+    # 仅推最新10条，减少内容量（原有逻辑不变）
     news_list = all_news[:10]
-    latest = news_list[0]
-    time = get_show_time(latest)
-    date = latest.get("updated", "").split('T')[0]
-    title = f"路透社最新资讯 {date} {time}\n" + "-"*40 + "\n"
+    # 核心修改：标题仅保留「路透速递」，去掉日期时间，添加「」符号
+    title = f"<p>「路透速递」</p>"
 
     content = []
     for i, news in enumerate(news_list, 1):
         link = news["link"]
         title_news = news["title"]
         show_t = get_show_time(news)
-        content.append(f"{i}. 【{show_t}】{title_news}\n链接：{link}\n")
+        # 纯「👉 原文链接」超链接，无任何多余说明
+        content.append(f"<p>{i}. 【{show_t}】{title_news}</p><p>👉 <a href='{link}' target='_blank'>原文链接</a></p>")
 
-    return title + "\n".join(content)
+    return title + "".join(content)
 
-# 同步发送邮件（确保发送完成，不被中断）
+# 同步发送邮件（仅改格式支持超链接，主题同步统一）
 def send_email(content):
-    msg = MIMEText(content, "plain", "utf-8")
-    msg["Subject"] = "路透社实时资讯推送"
+    # 核心修改：纯文本→HTML格式，支持超链接
+    msg = MIMEText(content, "html", "utf-8")
+    # 同步修改邮件主题为「路透速递」，与内容标题统一
+    msg["Subject"] = "「路透速递」"
     msg["From"] = SENDER_EMAIL
     msg["To"] = RECEIVER_EMAIL
     try:
@@ -112,10 +113,11 @@ def send_email(content):
     except Exception as e:
         print(f"❌ 邮件发送失败：{e}")
 
-# 核心入口
+# 核心入口（完全保留原始逻辑，无任何改动）
 if __name__ == "__main__":
     print("🔍 开始检测路透社资讯（每6分钟检测1次）...")
     need_push, news = check_push()
     if need_push and news:
         email_content = make_content(news)
         send_email(email_content)
+
