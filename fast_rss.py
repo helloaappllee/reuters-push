@@ -84,7 +84,7 @@ def check_push():
 def make_content(all_news):
     if not all_news:
         return "暂无可用的路透资讯"
-    news_list = all_news[:10]  # 仅推10条，避免内容冗余
+    news_list = all_news[:300]  # 推300条
 
     # ---------------------- 颜色配置（可直接改下面的颜色代码） ----------------------
     title_color = "#2E4057"    # 「路透速递」标题颜色（深灰蓝，醒目不刺眼）
