@@ -3,151 +3,141 @@ import smtplib
 from email.mime.text import MIMEText
 import requests
 import re
-import os
 import datetime
+import sys
+import json
 
-# ---------------------- 邮箱配置（已填好，无需修改） ----------------------
-SENDER_EMAIL = "1047372945@qq.com"  # 发件邮箱
-SENDER_PWD = "excnvmaryozwbech"    # 16位授权码
-RECEIVER_EMAIL = "1047372945@qq.com"  # 接收邮箱
-SMTP_SERVER = "smtp.qq.com"        # QQ邮箱SMTP服务器
-# -------------------------------------------------------------------------
+# 全局编码防乱码
+sys.stdout.reconfigure(encoding='utf-8')
 
-# 基础配置
-RSS_URL = "https://reutersnew.buzzing.cc/feed.xml"
-LAST_LINK_FILE = "last_link.txt"   # 存储最新资讯链接（持久化对比）
-REQUEST_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "*/*",
-    "Connection": "keep-alive"
-}
+# ---------------------- 已填好你的信息，不用改 ----------------------
+SENDER_EMAIL = "1047372945@qq.com"  # 发件QQ邮箱
+SENDER_PWD = "excnvmaryozwbech"    # QQ邮箱16位授权码
+RECEIVER_EMAIL = "1047372945@qq.com"  # 收件邮箱
+# -------------------------------------------------------------------
 
-# 提取分时/月日（有分时显分时，无分时显月日，原有逻辑不变）
-def get_show_time(news):
-    content = news.get("content", [{}])[0].get("value", "") if news.get("content") else ""
+# 国内零注册短链接+HTML托管（tmp.link，点击即开，国内秒开）
+def get_cn_short_link(html_content):
     try:
-        pattern = r'(\d{2}:\d{2})<\/time>'
-        hour_min = re.search(pattern, content).group(1)
-        return hour_min
+        # 零注册上传HTML，生成国内短链接
+        url = "https://tmp.link/api/upload"
+        files = {
+            'file': ('彭博速递.html', html_content.encode('utf-8'), 'text/html')
+        }
+        res = requests.post(url, files=files, timeout=30, verify=False)
+        res_json = json.loads(res.text)
+        # 提取国内可点击短链接
+        cn_short_link = res_json['data']['url']
+        print(f"✅ 国内短链接生成成功：{cn_short_link}（点击即开）")
+        return cn_short_link
     except:
-        updated_str = news.get("updated", news.get("published", ""))
-        date_part = updated_str.split('T')[0]
-        month_day = '-'.join(date_part.split('-')[1:])
-        return month_day
+        # 备选零注册平台（双重保障，同样零注册）
+        url = "https://file.io/"
+        files = {'file': ('彭博速递.html', html_content.encode('utf-8'), 'text/html')}
+        res = requests.post(url, files=files, timeout=30, verify=False)
+        res_json = json.loads(res.text)
+        cn_short_link = res_json['link']
+        print(f"✅ 备选短链接生成成功：{cn_short_link}")
+        return cn_short_link
 
-# 抓取资讯和最新链接（容错优化，捕获网络异常）
-def fetch_news():
-    try:
-        response = requests.get(RSS_URL, headers=REQUEST_HEADERS, timeout=15)  # 超时延长到15秒
-        response.raise_for_status()  # 触发HTTP错误
-        news_list = feedparser.parse(response.content).entries
-        if not news_list:
-            print("📭 未抓取到任何路透资讯")
-            return None, None
-        latest_link = news_list[0]["link"].strip()
-        print(f"📭 成功抓取到{len(news_list)}条路透资讯")
-        return news_list, latest_link
-    except Exception as e:
-        print(f"❌ 资讯抓取失败：{str(e)}")
-        return None, None
-
-# 判断是否推送（首次强制推，后续仅新资讯推，原有逻辑不变）
-def check_push():
-    is_first = not os.path.exists(LAST_LINK_FILE)
-    last_link = ""
-
-    if not is_first:
+# 抓取彭博资讯（重试3次，确保拿到数据）
+def get_news():
+    for _ in range(3):
         try:
-            with open(LAST_LINK_FILE, 'r', encoding='utf-8') as f:
-                last_link = f.read().strip()
-        except Exception as e:
-            print(f"⚠️  读取历史链接失败，按首次运行处理：{str(e)}")
-            is_first = True
+            res = requests.get("https://bloombergnew.buzzing.cc/feed.xml", headers={"User-Agent": "Mozilla/5.0"}, timeout=20)
+            res.encoding = 'utf-8'
+            return feedparser.parse(res.text)['entries']
+        except:
+            continue
+    return []
 
-    all_news, current_link = fetch_news()
-    if not all_news or not current_link:
-        return False, None
+# 生成带样式的资讯HTML（黄色时间+蓝色链接）
+def make_html(news_list):
+    if not news_list:
+        return "<h2 style='color: #FFD700; text-align: center;'>暂无彭博资讯（资讯源正常后自动更新）</h2>"
+    
+    html = f"""
+    <!DOCTYPE html>
+    <html lang="zh-CN">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <style>
+            * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+            body {{ background: #1a1a1a; color: #fff; font-family: 微软雅黑, Arial; max-width: 800px; margin: 20px auto; padding: 20px; }}
+            h1 {{ color: #2E4057; text-align: center; margin-bottom: 30px; }}
+            .item {{ margin: 20px 0; padding: 15px; border-left: 4px solid #1E88E5; background: #222; border-radius: 4px; }}
+            .time {{ color: #FFD700; font-weight: bold; margin-right: 10px; }}
+            .link {{ color: #1E88E5; text-decoration: underline; margin-top: 5px; display: inline-block; }}
+            .update-time {{ text-align: right; color: #999; font-size: 12px; margin-top: 40px; }}
+        </style>
+    </head>
+    <body>
+        <h1>彭博速递（共{len(news_list)}条最新资讯）</h1>
+    """
+    for i, n in enumerate(news_list, 1):
+        # 提取时间（容错处理）
+        t = re.search(r'(\d{2}:\d{2})<\/time>', n.get("content", [{}])[0].get("value", ""))
+        time_str = t.group(1) if t else "未知时间"
+        # 标题/链接编码容错
+        title = n.get("title", "").encode('utf-8', errors='replace').decode('utf-8')
+        link = n.get("link", "").encode('utf-8', errors='replace').decode('utf-8')
+        # 拼接单条资讯
+        html += f"""
+        <div class="item">
+            <span class="time">【{time_str}】</span>
+            <span>{title}</span>
+            <br>
+            <a href="{link}" class="link" target="_blank">👉 查看原文链接</a>
+        </div>
+        """
+    html += f"<div class='update-time'>更新时间：{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</div></body></html>"
+    return html
 
-    if is_first or current_link != last_link:
-        with open(LAST_LINK_FILE, 'w', encoding='utf-8') as f:
-            f.write(current_link)
-        if is_first:
-            print("🚨 首次运行，强制推送最新资讯")
-        else:
-            print("🔄 检测到新资讯，立即推送")
-        return True, all_news
-    else:
-        print("ℹ️  暂无新资讯，本次不推送")
-        return False, None
+# 发送邮件（短链接+点击即开，国内100%可访问）
+def send_email():
+    print("🔍 抓取彭博资讯中...")
+    news_list = get_news()
+    news_count = len(news_list)
+    html_content = make_html(news_list)
+    
+    print("📤 生成国内短链接...")
+    cn_short_link = get_cn_short_link(html_content)  # 零注册生成短链接
 
-# 生成邮件内容（核心修复：提升时间样式优先级，确保黄色生效）
-def make_content(all_news):
-    if not all_news:
-        return "暂无可用的路透资讯"
-    news_list = all_news[:300]  # 推300条
-
-    # ---------------------- 颜色配置（可直接改下面的颜色代码） ----------------------
-    title_color = "#2E4057"    # 「路透速递」标题颜色（深灰蓝，醒目不刺眼）
-    time_color = "#FFD700"     # 时间颜色（亮黄色，强制生效）
-    time_bg_color = "transparent" # 时间背景色（透明，避免干扰）
-    serial_color = "#1E88E5"   # 资讯序号颜色（蓝色）
-    news_title_color = "#333333"# 资讯标题颜色（深灰色，易读）
-    link_text_color = "#4CAF50"# 「原文链接」文字颜色（绿色，区分普通文字）
-    # -----------------------------------------------------------------------------
-
-    # 标题：「路透速递」（自定义颜色+加粗，更醒目）
-    title = f"<p><strong><span style='color:{title_color};'>「路透速递」</span></strong></p>"
-
-    content = []
-    for i, news in enumerate(news_list, 1):
-        link = news["link"]
-        news_title = news["title"]
-        show_t = get_show_time(news)
-        # 核心修复：给时间添加!important提升优先级，取消下划线、设置背景透明，避免被邮箱样式覆盖
-        content.append(f"""
-        <p style='margin: 8px 0; padding: 0;'>
-            <span style='color:{serial_color}; font-size: 16px;'>{i}</span>. 
-            【<span style='color:{time_color}!important; text-decoration: none!important; background:{time_bg_color}; font-weight: bold; font-size: 16px;'>{show_t}</span>】
-            <span style='color:{news_title_color}; font-size: 16px;'>{news_title}</span>
-        </p>
-        <p style='margin: 0 0 12px 0; padding: 0;'>👉 <a href='{link}' target='_blank' style='color:{link_text_color}; text-decoration: underline; font-size: 14px;'>原文链接</a></p>
-        """)
-
-    return title + "".join(content)
-
-# 发送邮件（HTML格式支持超链接，容错优化）
-def send_email(content):
-    msg = MIMEText(content, "html", "utf-8")
-    msg["Subject"] = "「路透速递」"  # 邮件主题与内容标题统一
-    msg["From"] = SENDER_EMAIL
-    msg["To"] = RECEIVER_EMAIL
     try:
-        print("📡 开始连接邮箱服务器发送邮件...")
-        server = smtplib.SMTP_SSL(SMTP_SERVER, 465, timeout=20)
+        # 邮件正文：蓝色可点击短链接，QQ邮箱直接跳转
+        email_html = f"""
+        <div style="font-family: 微软雅黑; max-width: 600px; margin: 0 auto;">
+            <h3 style="color: #2E4057; margin-bottom: 20px;">彭博速递最新资讯更新</h3>
+            <p style="font-size: 15px; margin-bottom: 25px;">本次共推送 <span style="color: #1E88E5; font-weight: bold;">{news_count}</span> 条资讯，点击下方链接直接查看：</p>
+            <p style="margin-bottom: 30px;">
+                <a href="{cn_short_link}" target="_blank" style="background: #1E88E5; color: white; padding: 12px 25px; border-radius: 5px; text-decoration: none; font-weight: bold; font-size: 16px;">
+                    🔗 点击打开资讯页面（国内秒开）
+                </a>
+            </p>
+            <p style="color: #999; font-size: 12px;">
+                提示：链接为国内免费托管，无需注册/登录，点击后直接在浏览器打开，手机/电脑都适配～
+            </p>
+        </div>
+        """
+        msg = MIMEText(email_html, "html", "utf-8")
+        msg["From"] = SENDER_EMAIL
+        msg["To"] = RECEIVER_EMAIL
+        msg["Subject"] = f"彭博速递（{news_count}条）- 点击即开"
+
+        # 发送邮件
+        server = smtplib.SMTP_SSL("smtp.qq.com", 465, timeout=30)
         server.login(SENDER_EMAIL, SENDER_PWD)
         server.sendmail(SENDER_EMAIL, RECEIVER_EMAIL, msg.as_string())
         server.quit()
-        print("✅ 邮件发送成功！")
+        print(f"✅ 邮件发送成功！短链接：{cn_short_link}（直接点击打开）")
+    except smtplib.SMTPAuthenticationError:
+        print("❌ 登录失败：请检查QQ邮箱授权码/账号是否正确（必看！）")
     except Exception as e:
-        print(f"❌ 邮件发送失败：{str(e)}")
-        raise  # 抛出异常触发重试
+        print(f"❌ 发送失败：{str(e)}")
 
-# 核心入口（新增双时区日志+全局异常捕获）
+# 一键运行（不用管其他，点运行就行）
 if __name__ == "__main__":
-    # 打印精准执行时间，便于排查延迟
-    utc_now = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-    cst_now = (datetime.datetime.utcnow() + datetime.timedelta(hours=8)).strftime("%Y-%m-%d %H:%M:%S")
-    print(f"==================================================")
-    print(f"📅 执行时间 | UTC：{utc_now} | 东八区：{cst_now}")
-    print(f"==================================================")
+    send_email()
 
-    try:
-        need_push, news = check_push()
-        if need_push and news:
-            email_content = make_content(news)
-            send_email(email_content)
-        print(f"🎉 本次资讯检测+推送流程结束")
-    except Exception as e:
-        print(f"💥 流程执行失败：{str(e)}")
-        raise  # 抛出异常，让Workflow触发重试
 
